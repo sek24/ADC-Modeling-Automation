@@ -1,0 +1,90 @@
+* ADC System Builder: Automated Ligand Alignment and Patching
+* Description: This script automates the placement of a ligand onto a protein surface 
+* using geometric translation and applies a topological patch for covalent bonding.
+* Author: Seonghan Kim
+*
+
+DIMENS CHSIZE 3000000
+
+! -------------------------------------------------------------------------
+! Parameter configuration
+! Define target residues and segment IDs for high reusability/automation
+! -------------------------------------------------------------------------
+set prot_seg   PROA      ! Protein Segment ID
+set prot_res   287       ! Target Residue ID (Conjugation Site)
+set lig_seg    LIG       ! Ligand Segment ID
+set patch_name ZFSF      ! Covalent Patch Name
+set data_dir   ./inputs  ! Directory containing RTF/PRM/PDB files
+! -------------------------------------------------------------------------
+
+! Read topology and parameters
+stream toppar.str
+
+! Custom ligand topology and parameters
+open read card unit 10 name @data_dir/ligand.rtf
+read rtf card unit 10 append
+
+open read card unit 20 name @data_dir/ligand.prm
+read para flex card unit 20 append
+
+! Read antibody protein
+open read card unit 10 name @data_dir/protein_surface.psf
+read psf unit 10 card append
+open read card unit 10 name @data_dir/protein_surface.crd
+read coor unit 10 card append
+
+! -------------------------------------------------------------------------
+! Geometric alignment:
+! Calculates the translation vector to position the ligand near the site.
+! -------------------------------------------------------------------------
+
+! Determine the coordinates of the protein attachment site (Target)
+coor stat sele segid @prot_seg .and. resid @prot_res end
+calc target_x = ?xave + 5.0   ! Buffer distance to avoid initial clash
+calc target_y = ?yave + 5.0
+calc target_z = ?zave + 5.0
+
+! Read ligand structure
+open read card unit 10 name @data_dir/ligand_initial.psf
+read psf unit 10 card append
+open read card unit 10 name @data_dir/ligand_initial.crd
+read coor unit 10 card append
+
+! Determine the coordinates of the ligand anchor atom
+! C42 atom is used as the linking point
+coor stat sele segid @lig_seg .and. resid 1 .and. type C42 end
+calc source_x = ?xave
+calc source_y = ?yave
+calc source_z = ?zave
+
+! Calculate Translation Vector
+calc dx = @source_x - @target_x - 10.0
+calc dy = @source_y - @target_y + 0.0
+calc dz = @source_z - @target_z + 0.0
+
+! Move the ligand to the target site
+coor trans xdir -@dx ydir -@dy zdir -@dz sele segid @lig_seg end
+
+! -------------------------------------------------------------------------
+! Create the covalent bond and relax the system geometry.
+! -------------------------------------------------------------------------
+
+! Covalent bond (connects protein residue to ligand)
+patch @patch_name @prot_seg @prot_res @lig_seg 1 setup warn
+
+! Initial energy evaluation
+energy
+
+! Multi-step minimization to remove steric clashes
+mini sd   nstep 100 ! steepest descent (sd) for initial relaxation
+mini abnr nstep 100 ! adaoted basis newton-rapshon (abnr) for convergence
+
+! -------------------------------------------------------------------------
+! Output
+! -------------------------------------------------------------------------
+open write card unit 10 name adc_complex_final.pdb
+write coor pdb unit 10
+open write card unit 10 name adc_complex_final.psf
+write psf unit 10 card
+
+stop
